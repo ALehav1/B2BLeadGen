@@ -228,6 +228,41 @@ Best regards,
             company_name=company_data['name']
         )
 
+def analyze_product_description(description: str) -> str:
+    """
+    Analyze a product description to automatically determine the target market.
+    
+    Args:
+        description: A detailed description of the product
+        
+    Returns:
+        A string describing the target market
+    """
+    try:
+        # Initialize the product researcher
+        researcher = ProductResearcher()
+        
+        # Analyze the product description to identify:
+        # - Industry focus
+        # - Company size
+        # - Key pain points
+        # - Decision makers
+        analysis = researcher.analyze_product(description)
+        
+        # Format the target market description
+        target_market = f"""
+        Industries: {', '.join(analysis.get('target_industries', []))}
+        Company Size: {analysis.get('target_company_size', 'Any')}
+        Key Decision Makers: {', '.join(analysis.get('target_roles', []))}
+        Pain Points: {', '.join(analysis.get('pain_points', []))}
+        """
+        
+        return target_market
+        
+    except Exception as e:
+        print(f"Error analyzing product description: {str(e)}")
+        return "Could not determine target market automatically. Please provide target market details manually."
+
 def run_lead_finder(product_description: str, target_market: str, num_leads: int = 3) -> List[Dict[str, Any]]:
     """
     Run the lead finder with custom product and target market parameters.
