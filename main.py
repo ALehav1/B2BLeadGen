@@ -228,6 +228,54 @@ Best regards,
             company_name=company_data['name']
         )
 
+def run_lead_finder(product_description: str, target_market: str, num_leads: int = 3) -> List[Dict[str, Any]]:
+    """
+    Run the lead finder with custom product and target market parameters.
+    
+    Args:
+        product_description: Description of the product or service
+        target_market: Description of the target market/ideal customer profile
+        num_leads: Number of leads to find (default: 3)
+        
+    Returns:
+        List of dictionaries containing lead information
+    """
+    # Create a dynamic product configuration based on input
+    dynamic_product_config = {
+        'description': product_description,
+        'target_market': target_market,
+    }
+    
+    # Initialize components
+    web_scraper = WebScraper()
+    company_researcher = CompanyResearcher()
+    product_researcher = ProductResearcher()
+    
+    # Create lead finder instance
+    lead_finder = LeadFinder(dynamic_product_config)
+    
+    try:
+        # Find potential leads
+        leads = lead_finder.analyze_companies(web_scraper.get_test_companies())
+        
+        # Format results
+        formatted_leads = []
+        for lead in leads:
+            formatted_lead = {
+                'company_name': lead.get('company_name', 'Unknown'),
+                'website': lead.get('website', 'N/A'),
+                'description': lead.get('description', 'N/A'),
+                'match_analysis': lead.get('match_analysis', 'No analysis available'),
+                'contact_info': lead.get('contact_info', 'No contact information available')
+            }
+            formatted_leads.append(formatted_lead)
+            
+        return formatted_leads
+        
+    except Exception as e:
+        print(f"Error finding leads: {str(e)}")
+        return []
+
 def analyze_prospects(companies, min_urgency_score=2.0):
     researcher = CompanyResearcher()
     pitch_generator = SalesPitchGenerator()
