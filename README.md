@@ -1,41 +1,90 @@
 # B2B Lead Finder
 
-An intelligent B2B lead generation system that uses AI agents to analyze products and identify potential customers based on web and social media signals.
+An AI-powered B2B lead generation platform that helps you identify and qualify potential customers based on your product description. The system analyzes target markets, identifies matching companies, and generates personalized outreach emails.
 
-## Setup
+## Features
 
-1. Create a virtual environment:
+- 🎯 Smart Market Analysis
+- 🔍 AI-Powered Company Matching
+- 📊 Real-time Progress Tracking
+- ✉️ Personalized Email Generation
+- 💡 Custom Value Propositions
+
+## Setup Instructions
+
+1. Clone the repository:
+```bash
+git clone https://github.com/ALehav1/B2BLeadGen.git
+cd B2BLeadGen
+```
+
+2. Create a virtual environment:
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-2. Install dependencies:
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Create a .env file with your API keys:
+4. Create a `.env` file in the root directory:
+```bash
+touch .env
+```
+
+5. Add your OpenAI API key to the `.env` file:
 ```
 OPENAI_API_KEY=your_key_here
 ```
 
+## Running the Application
+
+Start the Streamlit app:
+```bash
+streamlit run app.py
+```
+
+The app will open in your default web browser. Follow these steps:
+
+1. Enter your product description and company name
+2. Review and edit the AI-generated market analysis
+3. Set optional search preferences (location, company types)
+4. View matched companies with:
+   - Match reasons
+   - Recent signals
+   - Value propositions
+   - Generated outreach emails
+
 ## Project Structure
 
-- `agents/`: Contains specialized AI agents
-  - `product_analyzer.py`: Analyzes product websites and marketing materials
-  - `company_researcher.py`: Researches companies and their needs
-  - `lead_qualifier.py`: Qualifies and ranks potential leads
+- `app.py`: Streamlit web interface
+- `main.py`: Core business logic and AI integration
+- `agents/`: Specialized AI agents for different tasks
+- `tools/`: Utility functions and helpers
+- `requirements.txt`: Project dependencies
+- `.env`: API key configuration (create this yourself)
 
-- `tools/`: Contains utility functions
-  - `web_scraper.py`: Web scraping utilities
-  - `data_processor.py`: Data processing and analysis tools
+## Requirements
 
-- `main.py`: Main application entry point
+- Python 3.8+
+- OpenAI API key
+- Internet connection for AI and research capabilities
 
-## Usage
+## Security Note
 
-Run the application:
-```bash
-python main.py
-```
+- Never commit your `.env` file
+- Keep your API keys secure
+- The `.gitignore` file is configured to protect sensitive information
+
+## Contributing
+
+Feel free to:
+- Open issues
+- Submit pull requests
+- Suggest improvements
+
+## License
+
+MIT License - feel free to use and modify as needed!
