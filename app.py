@@ -1,133 +1,225 @@
+"""Streamlit app for B2B lead finder."""
 import streamlit as st
-from main import run_lead_finder, analyze_product_description
 import os
 from dotenv import load_dotenv
-import time
-
-# Load environment variables
-load_dotenv()
+from main import LeadFinder
 
 def main():
-    st.set_page_config(
-        page_title="B2B Lead Finder",
-        page_icon="🎯",
-        layout="wide"
-    )
-
-    st.title("🎯 B2B Lead Finder")
+    # Load environment variables
+    load_dotenv(override=True)
     
-    # Mode selection
-    mode = st.radio(
-        "Choose your mode",
-        ["Existing Product", "Product Idea"],
-        help="Choose 'Existing Product' to find leads for a real product, or 'Product Idea' to test market fit for a hypothetical product"
-    )
+    # Get API key from environment
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        st.error("OpenAI API key not found. Please make sure it's set in your .env file.")
+        return
 
-    if mode == "Existing Product":
-        st.markdown("""
-        ### Existing Product Mode
-        Describe your product as you would to a potential customer. Focus on what it does and the problems it solves.
-        """)
+    st.title("B2B Lead Finder")
+    
+    # Initialize session state
+    if 'step' not in st.session_state:
+        st.session_state.step = 1
+    if 'market_analysis' not in st.session_state:
+        st.session_state.market_analysis = None
+    if 'stop_requested' not in st.session_state:
+        st.session_state.stop_requested = False
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Step 1: Product Information")
+        product_description = st.text_input("What's your product?")
+        company_name = st.text_input("What's your company name?")
         
-        example_description = """
-        CreditLens is a cloud-based credit origination and risk assessment platform that helps financial institutions 
-        streamline their lending operations. It automates the entire lending process from application to decision, 
-        reducing manual work and ensuring consistent risk assessment across all loans.
-        """
-        
-        product_description = st.text_area(
-            "Product Description",
-            placeholder=example_description,
-            height=150,
-            help="Describe what your product does and the problems it solves. Be specific about its features and benefits."
-        )
-
-    else:  # Product Idea mode
-        st.markdown("""
-        ### Product Idea Mode
-        Describe your product concept and specify your target market to test potential market fit.
-        """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            product_description = st.text_area(
-                "Product Concept",
-                placeholder="Describe your product idea and its key features...",
-                height=150
-            )
-        
-        with col2:
-            target_market = st.text_area(
-                "Target Market Criteria (Optional)",
-                placeholder="Describe your ideal customer profile...",
-                height=150
-            )
-
-    num_leads = st.slider("Number of leads to find", min_value=1, max_value=10, value=3)
-
-    # Process button with loading animation
-    if st.button("Find Leads", type="primary"):
-        if not product_description:
-            st.error("Please provide a product description.")
-            return
-
-        # Create a placeholder for the progress bar
-        progress_placeholder = st.empty()
-        
-        # Create placeholders for different stages
-        analysis_status = st.empty()
-        search_status = st.empty()
-        qualification_status = st.empty()
-
-        try:
-            with st.spinner():
-                # Show progress stages
-                analysis_status.info("🔍 Analyzing product description...")
-                if mode == "Existing Product":
-                    # Analyze product description to determine target market
-                    target_market = analyze_product_description(product_description)
-                    time.sleep(1)  # Give user time to see the analysis happening
-                    
-                search_status.info("🌐 Searching for potential leads...")
-                results = run_lead_finder(
-                    product_description=product_description,
-                    target_market=target_market if mode == "Product Idea" else None,
-                    num_leads=num_leads
-                )
-                time.sleep(1)  # Give user time to see the search happening
+        analyze_button = st.button("Analyze Product")
+        if analyze_button and product_description and company_name:
+            with st.spinner('Analyzing product...'):
+                status_area = st.empty()
+                progress_bar = st.progress(0)
                 
-                qualification_status.info("⚖️ Qualifying leads...")
-                time.sleep(1)  # Give user time to see the qualification happening
+                try:
+                    finder = LeadFinder(api_key)
+                    
+                    # First analyze the product and target market
+                    market_analysis = finder._analyze_target_market(product_description, company_name)
+                    st.session_state.market_analysis = market_analysis
+                    st.success(' Market analysis complete!')
+                    st.session_state.step = 2
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
+                    return
+        elif analyze_button:
+            st.warning("Please enter both product name and company name.")
+            
+        # Only show Step 2 if market analysis is complete
+        if st.session_state.step >= 2 and st.session_state.market_analysis:
+            st.subheader("Market Analysis")
+            
+            # Display and allow editing of market analysis
+            edited_analysis = st.text_area("Review and edit the analysis:", 
+                                         value=st.session_state.market_analysis, 
+                                         height=300)
+            st.session_state.market_analysis = edited_analysis
+            
+            st.subheader("Step 2: Find Prospects")
+            
+            # Search preferences in expandable section
+            with st.expander("", expanded=True):
+                col3, col4 = st.columns(2)
+                with col3:
+                    location_pref = st.text_input("Preferred location (e.g., 'US West Coast', 'Europe'):")
+                with col4:
+                    company_types = st.text_input("Preferred company types (e.g., 'SaaS', 'Manufacturing'):")
+            
+            col5, col6 = st.columns(2)
+            with col5:
+                find_button = st.button("Find Matching Companies")
+            with col6:
+                stop_button = st.button("Stop Search")
+                if stop_button:
+                    st.session_state.stop_requested = True
+            
+            if find_button:
+                with st.spinner('Finding matching companies...'):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    def update_progress(current, total):
+                        if st.session_state.stop_requested:
+                            st.warning("Search stopped by user.")
+                            st.stop()
+                        progress = int((current / total) * 100)
+                        progress_bar.progress(progress)
+                        status_text.text(f"  company {current} of {total}")
+                    
+                    try:
+                        finder = LeadFinder(api_key)
+                        matching_companies = finder.find_matching_companies(
+                            product_description,
+                            company_name,
+                            st.session_state.market_analysis,
+                            callback=update_progress,
+                            location_preference=location_pref if location_pref else None,
+                            company_types=company_types if company_types else None
+                        )
+                        
+                        st.session_state.stop_requested = False
+                        status_text.text(" Analysis complete!")
+                        
+                        if matching_companies:
+                            st.subheader("Matching Companies")
+                            for prospect in matching_companies:
+                                with st.expander(f" {prospect['company_name']}", expanded=True):
+                                    # Display match reasons
+                                    st.markdown("""
+                                    <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;'>
+                                        <h4 style='color: #2c3e50; margin-bottom: 15px;'>Why They're a Good Prospect</h4>
+                                        <div style='margin-left: 20px; background-color: white; padding: 15px; border-radius: 5px;'>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    for reason in prospect['match_reasons']:
+                                        st.markdown(f"• {reason}")
+                                    
+                                    st.markdown("</div></div>", unsafe_allow_html=True)
+                                    
+                                    # Display recent signals
+                                    st.markdown("""
+                                    <div style='background-color: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;'>
+                                        <h4 style='color: #2c3e50; margin-bottom: 15px;'>Recent Events & Signals</h4>
+                                        <div style='margin-left: 20px; background-color: white; padding: 15px; border-radius: 5px;'>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    for signal in prospect['recent_signals']:
+                                        st.markdown(f"• {signal}")
+                                    
+                                    st.markdown("</div></div>", unsafe_allow_html=True)
+                                    
+                                    # Display value proposition
+                                    value_prop = prospect['value_proposition']
+                                    if value_prop:
+                                        st.markdown(f"""
+                                        <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;'>
+                                            <h4 style='color: #2c3e50; margin: 0 0 10px 0;'>💡 Value Proposition</h4>
+                                            <div style='margin-left: 15px; background-color: white; padding: 12px; border-radius: 5px;'>
+                                                <p style='color: #2c3e50; line-height: 1.4; margin: 0;'>{value_prop}</p>
+                                            </div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    # Email Generation Button
+                                    email_key = f"email_{prospect['company_name']}"
+                                    if email_key not in st.session_state:
+                                        st.session_state[email_key] = None
+                                    
+                                    if st.button(f"Generate Email for {prospect['company_name']}", key=f"btn_{email_key}"):
+                                        email = finder._generate_email(
+                                            prospect['company_name'],
+                                            prospect['match_reasons'],
+                                            prospect['recent_signals']
+                                        )
+                                        st.session_state[email_key] = email
+                                    
+                                    # Display email if it exists in session state
+                                    if st.session_state[email_key]:
+                                        email = st.session_state[email_key]
+                                        email_parts = email.split('\n', 1)
+                                        if len(email_parts) == 2:
+                                            subject = email_parts[0].replace('Subject:', '').strip()
+                                            body = email_parts[1].strip()
+                                            
+                                            st.markdown(f"""
+                                            <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px;'>
+                                                <h4 style='color: #2c3e50; margin: 0 0 10px 0;'>📧 Personalized Email</h4>
+                                                <div style='margin-left: 15px; background-color: white; padding: 12px; border-radius: 5px;'>
+                                                    <p style='color: #2c3e50; margin: 0 0 8px 0;'><strong>Subject:</strong> {subject}</p>
+                                                    <hr style='margin: 8px 0;'>
+                                                    <div style='color: #2c3e50; white-space: pre-line; line-height: 1.4;'>{body}</div>
+                                                </div>
+                                            </div>
+                                            """, unsafe_allow_html=True)
+                                        else:
+                                            st.error("Error: Could not parse email format properly")
+                        else:
+                            st.warning("No matching companies found.")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
+                    finally:
+                        st.session_state.stop_requested = False
 
-                # Clear status messages
-                analysis_status.empty()
-                search_status.empty()
-                qualification_status.empty()
-
-                # Display results
-                if results:
-                    st.header("Results")
-                    for idx, lead in enumerate(results, 1):
-                        with st.expander(f"Lead {idx}: {lead.get('company_name', 'Unknown Company')}"):
-                            st.markdown(f"**Company Name:** {lead.get('company_name', 'N/A')}")
-                            st.markdown(f"**Website:** {lead.get('website', 'N/A')}")
-                            st.markdown(f"**Description:** {lead.get('description', 'N/A')}")
-                            st.markdown("**Match Analysis:**")
-                            st.markdown(lead.get('match_analysis', 'N/A'))
-                            st.markdown("**Contact Information:**")
-                            st.markdown(lead.get('contact_info', 'N/A'))
-                else:
-                    st.warning("No leads found. Try adjusting your product description or target market criteria.")
-
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
-
-    # Add footer with GitHub link
-    st.markdown("---")
-    st.markdown(
-        "[![GitHub](https://img.shields.io/badge/GitHub-View_Source-lightgrey?logo=github&style=social)](https://github.com/ALehav1/B2BLeadGen)"
-    )
+    with col2:
+        st.markdown("""
+        ### How it works
+        
+        This tool helps you find and qualify potential B2B leads by:
+        
+        1. **Analyzing Your Product**
+           - Market characteristics
+           - Ideal customer profile
+           - Key buying signals
+        
+        2. **Finding Prospects**
+           - Company matching
+           - Signal detection
+           - Fit analysis
+        
+        3. **Qualifying Leads**
+           - Match scoring
+           - Recent events
+           - Growth signals
+        
+        4. **Generating Outreach**
+           - Value propositions
+           - Personalized emails
+           - Trigger events
+        
+        ### Tips for Best Results
+        
+        - Be specific about your product
+        - Review and edit the analysis
+        - Use location preferences
+        - Filter by company type
+        """)
 
 if __name__ == "__main__":
     main()

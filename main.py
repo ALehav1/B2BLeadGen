@@ -1,362 +1,428 @@
-"""Main module for the B2B Lead Finder application."""
-
-import sys
+"""Main module for B2B lead finder."""
+import re
 import json
-from typing import Dict, List, Any
-from tools.web_scraper import WebScraper
-from agents.company_researcher import CompanyResearcher
-from agents.product_researcher import ProductResearcher
-
-# CreditLens product configuration
-product_config = {
-    'name': 'CreditLens',
-    'description': 'Advanced credit assessment and portfolio management solution',
-    'target_industries': [
-        'Banking',
-        'Financial Services',
-        'Credit Unions',
-        'Alternative Lenders',
-        'Investment Management'
-    ],
-    'target_company_size': '100+',
-    'target_roles': [
-        'Chief Risk Officer',
-        'Credit Risk Manager',
-        'Head of Lending',
-        'Portfolio Manager',
-        'Chief Technology Officer'
-    ],
-    'pain_points': [
-        'Manual credit assessment process',
-        'Complex regulatory compliance',
-        'Legacy lending systems',
-        'Inefficient portfolio monitoring',
-        'Risk management challenges'
-    ],
-    'industry_keywords': [
-        'credit risk',
-        'loan portfolio',
-        'lending operations',
-        'risk management',
-        'regulatory compliance',
-        'credit assessment',
-        'portfolio monitoring',
-        'loan origination',
-        'credit workflow',
-        'risk analytics'
-    ]
-}
+import requests
+from typing import Dict, List, Any, Optional
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import random
+import openai
+import os
+from dotenv import load_dotenv
 
 class LeadFinder:
-    """Main class for finding potential CreditLens customers."""
+    """Main class for finding and analyzing B2B leads."""
     
-    def __init__(self, product_config: Dict):
-        """Initialize the lead finder with product configuration."""
-        self.product_config = product_config
-        self.web_scraper = WebScraper()
-        self.company_researcher = CompanyResearcher()
-        self.product_researcher = ProductResearcher()
+    def __init__(self, openai_api_key: str):
+        """Initialize the LeadFinder with OpenAI API key."""
+        if not openai_api_key:
+            raise ValueError("OpenAI API key is required")
+        if not openai_api_key.startswith("sk-"):
+            raise ValueError("Invalid OpenAI API key format")
+            
+        self.openai_api_key = openai_api_key
+        self.openai_client = openai.Client(api_key=openai_api_key)
+        self.cache = {}  # Cache for storing analyzed prospects
+        self.excluded_companies = [
+            "JPMorgan Chase", "Bank of America", "Citigroup", "Wells Fargo",
+            "Goldman Sachs", "Morgan Stanley", "HSBC", "Barclays",
+            "Deutsche Bank", "UBS", "Credit Suisse", "BNP Paribas"
+        ]
+        
+        # Signal patterns to look for in company news and announcements
+        self.signal_patterns = {
+            'expansion': [
+                r'expand(ing|s|ed)',
+                r'grow(ing|s|th)',
+                r'scal(ing|e|es)',
+                r'new (market|product|service)',
+                r'launch(ing|es|ed)'
+            ],
+            'technology': [
+                r'digital transformation',
+                r'moderniz(e|ing|ation)',
+                r'technology upgrade',
+                r'innovation'
+            ],
+            'funding': [
+                r'investment',
+                r'funding',
+                r'capital raise',
+                r'acquisition'
+            ],
+            'pain_points': [
+                r'challenge(s)?',
+                r'(operational )?issue(s)?',
+                r'inefficien(t|cy)',
+                r'problem(s)?',
+                r'need(s)? to improve'
+            ]
+        }
     
-    def analyze_company(self, company_name: str) -> Dict[str, Any]:
-        """Analyze a potential customer for CreditLens fit."""
+    def analyze_product(self, product_description: str, company_name: str) -> Dict[str, Any]:
+        """Analyze a product to identify target market and buying signals."""
         try:
-            print(f"\nAnalyzing {company_name}...")
+            # First, analyze the product and target market
+            analysis = self._analyze_target_market(product_description, company_name)
             
-            # Step 1: Gather company information
-            company_data = self.web_scraper.research_company(company_name)
-            if not company_data['success']:
-                return {
-                    'success': False,
-                    'error': f"Failed to gather data for {company_name}"
-                }
+            # Split into sections
+            sections = analysis.split('2. Key Buying Signals:')
+            if len(sections) != 2:
+                return {'success': False, 'error': 'Failed to parse analysis'}
+                
+            market_section = sections[0].replace('1. Target Market Characteristics:', '').strip()
+            signals_section = sections[1].strip()
             
-            # Step 2: Analyze company signals
-            company_analysis = self.company_researcher.analyze_company(company_data)
-            if not company_analysis['success']:
-                return {
-                    'success': False,
-                    'error': f"Failed to analyze {company_name}"
-                }
+            # Extract bullet points
+            features = [
+                line.strip().strip('-').strip()
+                for line in market_section.split('\n')
+                if line.strip() and line.strip().startswith('-')
+            ]
             
-            # Step 3: Match to CreditLens capabilities
-            product_match = self.product_researcher.match_company_needs(company_analysis['signals'])
-            if not product_match['success']:
-                return {
-                    'success': False,
-                    'error': f"Failed to match {company_name} to CreditLens"
-                }
-            
-            # Step 4: Generate comprehensive report
-            result = {
+            signals = [
+                line.strip().strip('-').strip()
+                for line in signals_section.split('\n')
+                if line.strip() and line.strip().startswith('-')
+            ]
+
+            return {
                 'success': True,
-                'company_name': company_name,
-                'institution_type': company_analysis.get('institution_type', 'unknown'),
-                'fit_score': product_match['score'],
-                'signals': company_analysis['signals'],
-                'signal_details': company_analysis.get('signal_details', {}),
-                'insights': company_analysis['insights'],
-                'value_props': product_match['value_propositions'],
-                'recommendation': product_match['recommendation']
+                'product_features': features,
+                'buying_signals': signals
             }
-            
-            # Print detailed analysis
-            self._print_analysis(result)
-            
-            return result
-            
+
         except Exception as e:
+            print(f"Error in analyze_product: {e}")
             return {
                 'success': False,
-                'error': f"Error analyzing {company_name}: {str(e)}"
+                'error': str(e)
             }
-    
-    def analyze_companies(self, company_names: List[str]) -> List[Dict[str, Any]]:
-        """Analyze multiple companies for CreditLens fit."""
-        results = []
-        for company in company_names:
-            result = self.analyze_company(company)
-            if result['success']:
-                results.append(result)
-        return sorted(results, key=lambda x: x['fit_score'], reverse=True)
-    
-    def _print_analysis(self, analysis: Dict[str, Any]) -> None:
-        """Print formatted analysis results."""
-        print("\n" + "="*80)
-        print(f"Company Analysis: {analysis['company_name']}")
-        print(f"Institution Type: {analysis['institution_type'].replace('_', ' ').title()}")
-        print(f"Fit Score: {analysis['fit_score']}/100")
-        print("="*80)
-        
-        # Print signal analysis
-        print("\nSignal Analysis:")
-        for category, subcats in analysis['signals'].items():
-            if any(subcats.values()):
-                print(f"\n{category.title()} Signals:")
-                for subcat, count in subcats.items():
-                    if count > 0:
-                        print(f"  - {subcat.replace('_', ' ').title()}: {count} signals")
-                        # Print example contexts
-                        if analysis['signal_details'].get(category, {}).get(subcat):
-                            for i, detail in enumerate(analysis['signal_details'][category][subcat][:2]):
-                                context = detail['context']
-                                if len(context) > 100:
-                                    context = context[:100] + "..."
-                                print(f"    Example {i+1}: {context}")
-        
-        # Print key insights
-        print("\nKey Insights:")
-        for insight in analysis['insights']:
-            print(f"- {insight}")
-        
-        # Print value propositions
-        print("\nRelevant CreditLens Value Propositions:")
-        for prop in analysis['value_props']:
-            print(f"- {prop}")
-        
-        print(f"\nRecommendation: {analysis['recommendation']}")
-        print("="*80 + "\n")
-
-class SalesPitchGenerator:
-    def __init__(self):
-        self.pitch_templates = {
-            'acquisition': """Subject: Streamline Post-Merger Credit Operations with CreditLens
-
-Dear {executive_name},
-
-I noticed {company_name}'s recent acquisition announcement and wanted to reach out. Having worked with several financial institutions during similar transitions, I understand the challenges of integrating credit operations and maintaining consistent risk management practices during this period.
-
-CreditLens has helped organizations like yours:
-• Standardize credit assessment across merged entities
-• Reduce integration time by 40%
-• Maintain regulatory compliance throughout the transition
-
-Would you have 15 minutes this week to discuss how we've helped other institutions navigate similar challenges?
-
-Best regards,
-[Your name]""",
-            'rapid_growth': """Subject: Scale Your Credit Operations Efficiently with CreditLens
-
-Dear {executive_name},
-
-Congratulations on {company_name}'s impressive growth. As you scale your operations, maintaining efficient credit assessment processes becomes crucial for sustainable expansion.
-
-Our CreditLens platform has helped fast-growing institutions:
-• Reduce credit decision time by 60%
-• Scale operations without proportionally increasing headcount
-• Maintain consistent risk assessment quality
-
-I'd welcome the opportunity to share specific examples of how we've supported similar growth journeys.
-
-Best regards,
-[Your name]""",
-            'system_integration': """Subject: Modernize Your Credit Operations with CreditLens
-
-Dear {executive_name},
-
-I understand {company_name} is working to standardize credit assessment processes across your organization. Many of our clients have faced similar challenges with legacy systems and found that modernizing their credit assessment infrastructure was key to ensuring operational efficiency.
-
-CreditLens helps institutions:
-• Consolidate multiple legacy systems into a single platform
-• Reduce credit decision delays by 60%
-• Ensure consistent risk assessment across all branches
-
-Would you be interested in seeing how other institutions have solved similar challenges?
-
-Best regards,
-[Your name]"""
-        }
-
-    def generate_pitch(self, company_data, urgency_signals):
-        # Determine primary signal type based on context relevance
-        signal_scores = {
-            'acquisition': 0,
-            'rapid_growth': 0,
-            'system_integration': 0
-        }
-        
-        for signal in urgency_signals:
-            if signal['type'] in signal_scores:
-                signal_scores[signal['type']] += 1
-            elif signal['type'] in ['modernization', 'legacy_system']:
-                signal_scores['system_integration'] += 1
-        
-        primary_type = max(signal_scores.items(), key=lambda x: x[1])[0]
-        template = self.pitch_templates.get(primary_type, self.pitch_templates['rapid_growth'])
-        
-        return template.format(
-            executive_name=company_data.get('executive_name', 'Chief Risk Officer'),
-            company_name=company_data['name']
-        )
-
-def analyze_product_description(description: str) -> str:
-    """
-    Analyze a product description to automatically determine the target market.
-    
-    Args:
-        description: A detailed description of the product
-        
-    Returns:
-        A string describing the target market
-    """
-    try:
-        # Initialize the product researcher
-        researcher = ProductResearcher()
-        
-        # Analyze the product description to identify:
-        # - Industry focus
-        # - Company size
-        # - Key pain points
-        # - Decision makers
-        analysis = researcher.analyze_product(description)
-        
-        # Format the target market description
-        target_market = f"""
-        Industries: {', '.join(analysis.get('target_industries', []))}
-        Company Size: {analysis.get('target_company_size', 'Any')}
-        Key Decision Makers: {', '.join(analysis.get('target_roles', []))}
-        Pain Points: {', '.join(analysis.get('pain_points', []))}
-        """
-        
-        return target_market
-        
-    except Exception as e:
-        print(f"Error analyzing product description: {str(e)}")
-        return "Could not determine target market automatically. Please provide target market details manually."
-
-def run_lead_finder(product_description: str, target_market: str, num_leads: int = 3) -> List[Dict[str, Any]]:
-    """
-    Run the lead finder with custom product and target market parameters.
-    
-    Args:
-        product_description: Description of the product or service
-        target_market: Description of the target market/ideal customer profile
-        num_leads: Number of leads to find (default: 3)
-        
-    Returns:
-        List of dictionaries containing lead information
-    """
-    # Create a dynamic product configuration based on input
-    dynamic_product_config = {
-        'description': product_description,
-        'target_market': target_market,
-    }
-    
-    # Initialize components
-    web_scraper = WebScraper()
-    company_researcher = CompanyResearcher()
-    product_researcher = ProductResearcher()
-    
-    # Create lead finder instance
-    lead_finder = LeadFinder(dynamic_product_config)
-    
-    try:
-        # Find potential leads
-        leads = lead_finder.analyze_companies(web_scraper.get_test_companies())
-        
-        # Format results
-        formatted_leads = []
-        for lead in leads:
-            formatted_lead = {
-                'company_name': lead.get('company_name', 'Unknown'),
-                'website': lead.get('website', 'N/A'),
-                'description': lead.get('description', 'N/A'),
-                'match_analysis': lead.get('match_analysis', 'No analysis available'),
-                'contact_info': lead.get('contact_info', 'No contact information available')
-            }
-            formatted_leads.append(formatted_lead)
             
-        return formatted_leads
-        
-    except Exception as e:
-        print(f"Error finding leads: {str(e)}")
-        return []
+    def find_matching_companies(self, product_description: str, company_name: str, 
+                              market_analysis: str, callback=None, 
+                              location_preference: str = None, 
+                              company_types: str = None) -> List[Dict]:
+        """Find companies that match the target market criteria."""
+        cache_key = f"{product_description}_{company_name}"
+        if cache_key in self.cache:
+            return self.cache[cache_key]
 
-def analyze_prospects(companies, min_urgency_score=2.0):
-    researcher = CompanyResearcher()
-    pitch_generator = SalesPitchGenerator()
-    
-    high_potential_prospects = []
-    
-    for company in companies:
-        analysis = researcher.analyze_company(company)
-        if 'urgency_signals' in analysis and analysis['urgency_signals']:
-            urgency_score = len(analysis['urgency_signals'])  # Simple scoring based on number of signals
-            if urgency_score >= min_urgency_score:
-                high_potential_prospects.append({
-                    'company': company,
-                    'analysis': analysis,
-                    'urgency_score': urgency_score,
-                    'pitch': pitch_generator.generate_pitch(company, analysis['urgency_signals'])
-                })
-    
-    # Sort by urgency score
-    high_potential_prospects.sort(key=lambda x: x['urgency_score'], reverse=True)
-    
-    return high_potential_prospects
+        try:
+            companies = self._get_companies_list(location_preference, company_types)
+            matching_companies = []
+            total = len(companies)
+
+            for i, company in enumerate(companies):
+                if callback:
+                    callback(i + 1, total)
+
+                if company in self.excluded_companies:
+                    continue
+
+                match_reasons = self._evaluate_company_fit(
+                    company, product_description, market_analysis)
+                
+                if match_reasons:
+                    signals = self._get_company_signals(company)
+                    value_prop = self._generate_value_proposition(
+                        company, match_reasons, signals)
+                    email = self._generate_email(
+                        company, match_reasons, signals)
+                    
+                    matching_companies.append({
+                        'company_name': company,
+                        'match_reasons': match_reasons,
+                        'recent_signals': signals,
+                        'value_proposition': value_prop,
+                        'email': email
+                    })
+
+            self.cache[cache_key] = matching_companies
+            return matching_companies
+
+        except Exception as e:
+            print(f"Error finding matching companies: {e}")
+            return []
+
+    def _analyze_target_market(self, product_description: str, company_name: str) -> str:
+        """Analyze target market and generate initial analysis."""
+        try:
+            prompt = f"""Analyze the ideal target market for {company_name}'s product: {product_description}
+
+Please provide a detailed analysis in two parts:
+
+1. Target Market Characteristics:
+- Company sizes
+- Industry verticals
+- Common pain points
+- Technical requirements
+- Budget considerations
+
+2. Key Buying Signals:
+- Trigger events
+- Business changes
+- Industry trends
+- Technology adoption patterns
+- Growth indicators
+
+Format as bullet points for each section."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a market research expert specializing in B2B markets."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"Error analyzing target market: {e}")
+            return "Error analyzing target market."
+
+    def _get_companies_list(self, location_preference: str = None, 
+                           company_types: str = None) -> List[str]:
+        """Get list of companies to analyze based on preferences."""
+        try:
+            prompt = "Generate a list of 5 potential companies to analyze."
+            if location_preference or company_types:
+                prompt += "\nPreferences:"
+                if location_preference:
+                    prompt += f"\n- Location: {location_preference}"
+                if company_types:
+                    prompt += f"\n- Company Types: {company_types}"
+            else:
+                prompt += "\nFocus on public companies across different industries."
+
+            prompt += "\nExclude major banks and financial institutions."
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a B2B market researcher. List only company names, one per line."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+
+            companies = [
+                company.strip() 
+                for company in response.choices[0].message.content.strip().split('\n')
+                if company.strip() and company.strip() not in self.excluded_companies
+            ]
+            return companies[:5]
+
+        except Exception as e:
+            print(f"Error getting companies list: {e}")
+            return []
+
+    def _evaluate_company_fit(self, company_name: str, product_description: str, market_analysis: str) -> List[str]:
+        """Evaluate how well a company fits the target market criteria."""
+        try:
+            prompt = f"""Evaluate how well {company_name} fits the target market criteria for {product_description}:
+
+Target Market Analysis:
+{market_analysis}
+
+Please provide a list of reasons why {company_name} is a good fit for this product, based on their recent business activities and market position.
+
+Format as bullet points."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a B2B market analyst. Focus on specific, actionable insights."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+
+            reasons = [
+                line.strip().strip('-').strip()
+                for line in response.choices[0].message.content.strip().split('\n')
+                if line.strip() and line.strip().startswith('-')
+            ]
+
+            return reasons
+
+        except Exception as e:
+            print(f"Error evaluating company fit: {e}")
+            return []
+
+    def _get_company_signals(self, company_name: str) -> List[str]:
+        """Get recent signals and news about a company that indicate potential fit."""
+        try:
+            prompt = f"""Analyze {company_name} as a potential customer based on recent business activities and market position.
+
+Please provide a list of recent signals that indicate potential fit, such as:
+
+- Recent announcements or news
+- Business changes or initiatives
+- Industry trends or adoption patterns
+- Growth indicators or financial performance
+
+Format as bullet points."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a B2B sales researcher. Focus on recent, specific evidence of need and concrete reasons for fit. Include dates where possible."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+
+            signals = [
+                line.strip().strip('-').strip()
+                for line in response.choices[0].message.content.strip().split('\n')
+                if line.strip() and line.strip().startswith('-')
+            ]
+
+            return signals
+
+        except Exception as e:
+            print(f"Error getting company signals: {e}")
+            return []
+
+    def _generate_value_proposition(self, company_name: str, match_reasons: List[str], signals: List[str]) -> str:
+        """Generate a personalized value proposition based on company signals."""
+        try:
+            prompt = f"""Create a brief, compelling value proposition for {company_name} based on:
+
+Match Reasons:
+{chr(10).join(f'- {reason}' for reason in match_reasons)}
+
+Recent Signals:
+{chr(10).join(f'- {signal}' for signal in signals)}
+
+Focus on:
+1. Their specific pain points
+2. How we solve their unique challenges
+3. The business value we provide
+
+Keep it concise (2-3 sentences) and specific to their needs."""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a B2B sales expert. Write compelling, personalized value propositions."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"Error generating value proposition: {e}")
+            return "Error generating value proposition."
+
+    def _generate_email(self, company_name: str, match_reasons: List[str], signals: List[str]) -> str:
+        """Generate a personalized email based on company match reasons and signals."""
+        try:
+            prompt = f"""Write a personalized sales email to {company_name} based on:
+
+Match Reasons:
+{chr(10).join(f'- {reason}' for reason in match_reasons)}
+
+Recent Signals:
+{chr(10).join(f'- {signal}' for signal in signals)}
+
+Requirements:
+1. Start with a clear subject line prefixed with 'Subject:'
+2. Reference specific company signals and events
+3. Focus on their pain points and our solution
+4. Keep it concise (3-4 paragraphs)
+5. End with a clear call to action
+
+Format:
+Subject: [Compelling Subject Line]
+
+[Email Body with proper spacing between paragraphs]"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a B2B sales expert who writes highly personalized, compelling sales emails. Focus on value and recent trigger events."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"Error generating email: {e}")
+            return "Error generating email."
+
+    def callback(self, message: str):
+        """Callback function for progress updates."""
+        print(message)
+
+def run_lead_finder(product_name, company_name, num_leads=10, is_existing_product=True):
+    """Run the lead finder with the given product description."""
+    try:
+        # Initialize components
+        finder = LeadFinder(os.getenv("OPENAI_API_KEY"))
+        
+        # Analyze product and find prospects
+        result = finder.analyze_product(product_name, company_name)
+        
+        if result['success']:
+            analysis = result
+            target_market = analysis['product_features']
+            buying_signals = analysis['buying_signals']
+            prospects = finder.find_matching_companies(product_name, company_name, 
+                              "\n".join(f"- {feature}" for feature in target_market), 
+                              callback=finder.callback)
+            
+            # Print criteria
+            print("\nIdeal Prospect Criteria:")
+            for category, items in finder._get_ideal_prospect_criteria(target_market).items():
+                print(f"\n{category.replace('_', ' ').title()}:")
+                for item in items:
+                    print(f"- {item}")
+            
+            # Print prospects
+            print("\nTop Matching Prospects:")
+            for prospect in prospects:
+                print(f"\n{prospect['company_name']}")
+                print("Recent Signals:")
+                for signal in prospect['recent_signals']:
+                    print(f"- {signal}")
+                print("\nMatch Reasons:")
+                for reason in prospect['match_reasons']:
+                    print(f"- {reason}")
+                print("\nValue Proposition:")
+                print(prospect['value_proposition'])
+                print("\nEmail:")
+                print(prospect['email'])
+                print("\n---")
+        else:
+            print(f"Error: {result['error']}")
+            
+    except Exception as e:
+        print(f"Error running lead finder: {e}")
 
 def main():
-    """Run the lead finder with test companies."""
-    scraper = WebScraper()
-    companies = scraper.get_test_companies()
+    """Run the lead finder."""
+    import sys
     
-    prospects = analyze_prospects(companies)
+    if len(sys.argv) < 3:
+        print("Usage: python main.py <product_name> <company_name>")
+        sys.exit(1)
     
-    if not prospects:
-        print("No high-urgency prospects found.")
-        return
+    product_name = sys.argv[1]
+    company_name = sys.argv[2]
     
-    # Display top prospect analysis and pitch
-    top_prospect = prospects[0]
-    print(f"\nTop Prospect Analysis: {top_prospect['company']['name']}")
-    print("-" * 50)
-    print(f"Urgency Score: {len(top_prospect['analysis']['urgency_signals'])}")
-    print("\nKey Urgency Signals:")
-    for signal in top_prospect['analysis']['urgency_signals']:
-        print(f"• {signal['type'].title()}: {signal['context']}")
+    print("\nB2B Lead Finder")
+    print("---------------")
+    print(f"\nAnalyzing {product_name} by {company_name}...")
     
-    print("\nRecommended Sales Pitch:")
-    print("=" * 50)
-    print(top_prospect['pitch'])
+    run_lead_finder(product_name, company_name)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
