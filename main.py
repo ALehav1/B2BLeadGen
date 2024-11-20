@@ -290,7 +290,7 @@ Format as bullet points."""
     def _generate_value_proposition(self, company_name: str, match_reasons: List[str], signals: List[str]) -> str:
         """Generate a personalized value proposition based on company signals."""
         try:
-            prompt = f"""Create a brief, compelling value proposition for {company_name} based on:
+            prompt = f"""Generate a compelling value proposition for {company_name} based on:
 
 Match Reasons:
 {chr(10).join(f'- {reason}' for reason in match_reasons)}
@@ -298,17 +298,22 @@ Match Reasons:
 Recent Signals:
 {chr(10).join(f'- {signal}' for signal in signals)}
 
-Focus on:
-1. Their specific pain points
-2. How we solve their unique challenges
-3. The business value we provide
+Requirements:
+1. Focus on their specific pain points from the match reasons
+2. Explain how we solve their unique challenges
+3. Highlight the business value we provide
+4. Keep it concise (2-3 sentences)
+5. Make it specific to their needs
+6. Do NOT start with 'Dear' or any greeting - this is a value proposition, not an email
 
-Keep it concise (2-3 sentences) and specific to their needs."""
+Example format:
+"Our [solution type] helps [company type] like [company name] [achieve specific benefit] by [explanation of how]. This addresses your [specific pain point] while [additional benefit], ultimately [business impact]."
+"""
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a B2B sales expert. Write compelling, personalized value propositions."},
+                    {"role": "system", "content": "You are a B2B sales expert who writes compelling, focused value propositions. Focus on concrete benefits and specific pain points."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7
@@ -318,45 +323,11 @@ Keep it concise (2-3 sentences) and specific to their needs."""
 
         except Exception as e:
             print(f"Error generating value proposition: {e}")
-            return "Error generating value proposition."
+            return None
 
     def _generate_email(self, company_name: str, match_reasons: List[str], signals: List[str]) -> str:
         """Generate a personalized email based on company match reasons and signals."""
-        try:
-            prompt = f"""Write a personalized sales email to {company_name} based on:
-
-Match Reasons:
-{chr(10).join(f'- {reason}' for reason in match_reasons)}
-
-Recent Signals:
-{chr(10).join(f'- {signal}' for signal in signals)}
-
-Requirements:
-1. Start with a clear subject line prefixed with 'Subject:'
-2. Reference specific company signals and events
-3. Focus on their pain points and our solution
-4. Keep it concise (3-4 paragraphs)
-5. End with a clear call to action
-
-Format:
-Subject: [Compelling Subject Line]
-
-[Email Body with proper spacing between paragraphs]"""
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are a B2B sales expert who writes highly personalized, compelling sales emails. Focus on value and recent trigger events."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7
-            )
-
-            return response.choices[0].message.content.strip()
-
-        except Exception as e:
-            print(f"Error generating email: {e}")
-            return "Error generating email."
+        return ""  # Email generation removed
 
     def callback(self, message: str):
         """Callback function for progress updates."""
